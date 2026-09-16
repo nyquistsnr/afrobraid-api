@@ -11,7 +11,7 @@ from app.core.pagination import PaginationParams
 from app.core.queue import get_task_queue
 from app.core.redis import get_redis
 from app.core.response import APIResponse
-from app.modules.auth.dependencies import require_roles
+from app.modules.auth.dependencies import get_current_user
 from app.modules.bookings import service
 from app.modules.bookings.enums import BookingStatus
 from app.modules.bookings.schemas import (
@@ -21,11 +21,15 @@ from app.modules.bookings.schemas import (
     PaginatedBookingsResponse,
     ReceiptSummaryResponse,
 )
-from app.modules.users.models import User, UserType
+from app.modules.users.models import User
 
 router = APIRouter(prefix="/api/v1/bookings", tags=["Bookings"])
 
-_require_customer = require_roles(UserType.CUSTOMER)
+# Any authenticated user can book - a BRAIDER or ADMIN account is still a
+# person who can want a style done, not just UserType.CUSTOMER ones. The
+# self-booking guard in service.create_booking is what stops a braider from
+# booking their own profile.
+_require_customer = get_current_user
 
 
 def _locale(request: Request) -> str:
@@ -119,9 +123,9 @@ async def get_booking(
     response_model=APIResponse[BookingResponse],
     summary="Reschedule a confirmed booking for free",
     description=(
-        "Customer-only. Free at any time up until 24h before the current "
-        "appointment (`cancellation_cutoff_at`); rejected inside that window. "
-        "Only CONFIRMED bookings are eligible."
+        "Free at any time up until 24h before the current appointment "
+        "(`cancellation_cutoff_at`); rejected inside that window. Only "
+        "CONFIRMED bookings are eligible."
     ),
 )
 async def reschedule_booking(
@@ -143,7 +147,7 @@ async def reschedule_booking(
     response_model=APIResponse[BookingResponse],
     summary="Resume an outstanding balance payment",
     description=(
-        "Customer-only. Creates a fresh, on-session PaymentIntent for the "
+        "Creates a fresh, on-session PaymentIntent for the "
         "remaining balance and returns its client_secret to confirm - for "
         "when the scheduled off-session charge needs a customer-present 3DS "
         "confirmation, or the customer just wants to pay before the next "
@@ -167,10 +171,10 @@ async def resume_booking_payment(
     response_model=APIResponse[BookingResponse],
     summary="Cancel a confirmed booking",
     description=(
-        "Customer-only. Free at any time up until 24h before the "
-        "appointment (`cancellation_cutoff_at`); rejected inside that "
-        "window. The deposit (or full amount already captured) is "
-        "non-refundable - only CONFIRMED bookings are eligible."
+        "Free at any time up until 24h before the appointment "
+        "(`cancellation_cutoff_at`); rejected inside that window. The "
+        "deposit (or full amount already captured) is non-refundable - "
+        "only CONFIRMED bookings are eligible."
     ),
 )
 async def cancel_booking(
