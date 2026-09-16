@@ -142,6 +142,7 @@
   "booking.not_found": "This booking doesn't exist.",
   "booking.starts_in_past": "The appointment time must be in the future.",
   "booking.braider_not_payable": "This braider can't accept payments right now. Please try again later.",
+  "booking.self_booking_not_allowed": "You can't book your own braider profile.",
   "booking.price_drift": "The price changed since your quote was created. Please request a new quote and try again.",
   "booking.slot_unavailable": "This time slot was just booked by someone else. Please choose another time.",
   "booking.terms_not_accepted": "You must accept the terms to complete this booking.",

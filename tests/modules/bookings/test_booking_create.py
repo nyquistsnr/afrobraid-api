@@ -6,14 +6,19 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import SelfBookingNotAllowedError
+from app.core.redis import get_redis_client
 from app.core.security import create_access_token
+from app.modules.bookings import service as bookings_service
 from app.modules.bookings.calculations.models import BookingCalculation, BookingCalculationStatus
 from app.modules.bookings.enums import BookingStatus
 from app.modules.bookings.models import Booking
+from app.modules.bookings.schemas import BookingCreateRequest
 from app.modules.braiders.offerings.models import BraiderStyle
 from app.modules.styles.models import Style
 from app.modules.users import repository as users_repo
 from app.modules.users.models import UserType
+from tests.conftest import FakeArqPool
 from tests.helpers import create_user_with_token
 from tests.modules.bookings.helpers import create_bookable_braider
 
@@ -130,6 +135,33 @@ async def test_create_booking_no_connect_account_returns_409(
     )
     assert resp.status_code == 409, resp.text
     assert resp.json()["error"]["code"] == "BRAIDER_NOT_PAYABLE"
+
+
+async def test_create_booking_rejects_braider_booking_own_profile(
+    client: AsyncClient, db_session: AsyncSession
+):
+    """A braider's user account is UserType.BRAIDER, so `_require_customer`
+    already keeps them off this endpoint entirely. This exercises the
+    service-level guard directly - the last line of defence should the
+    two roles ever stop being mutually exclusive (e.g. an admin-initiated
+    booking, or a future dual-role account)."""
+    braider = await create_bookable_braider(db_session, base_price="180.00", country="AT")
+    calc = await _create_calculation(client, braider)
+    starts_at = datetime.now(UTC) + timedelta(hours=10)
+
+    with pytest.raises(SelfBookingNotAllowedError):
+        await bookings_service.create_booking(
+            db_session,
+            get_redis_client(),
+            FakeArqPool(),
+            user=braider["user"],
+            data=BookingCreateRequest(
+                booking_calculation_id=calc["id"],
+                starts_at=starts_at,
+                terms_accepted=True,
+            ),
+            locale="en",
+        )
 
 
 async def test_create_booking_price_drift_returns_409(client: AsyncClient, db_session: AsyncSession):

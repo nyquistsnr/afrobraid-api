@@ -59,6 +59,7 @@ _AddonEntry = tuple[uuid.UUID, uuid.UUID, AddOn | None, Decimal, bool]
 @dataclass(frozen=True)
 class ResolvedInput:
     braider_id: uuid.UUID
+    braider_user_id: uuid.UUID
     style: Style
     braider_style: BraiderStyle
     variation: StyleVariation | None
@@ -164,6 +165,7 @@ async def resolve_calculation_input(db: AsyncSession, data: BookingCalculationIn
 
     return ResolvedInput(
         braider_id=profile.id,
+        braider_user_id=profile.user_id,
         style=style,
         braider_style=braider_style,
         variation=variation,

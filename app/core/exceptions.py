@@ -498,6 +498,14 @@ class BookingStartsInPastError(AppError):
     message_key = "booking.starts_in_past"
 
 
+class SelfBookingNotAllowedError(AppError):
+    """A braider can't book their own profile as a customer."""
+
+    status_code = status.HTTP_403_FORBIDDEN
+    code = "SELF_BOOKING_NOT_ALLOWED"
+    message_key = "booking.self_booking_not_allowed"
+
+
 class BraiderNotPayableError(AppError):
     """A braider without a fully-capable Stripe Connect account can't be
     booked - discovery already hides a braider who never finished payment

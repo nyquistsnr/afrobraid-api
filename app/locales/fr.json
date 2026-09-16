@@ -142,6 +142,7 @@
   "booking.not_found": "Cette réservation n'existe pas.",
   "booking.starts_in_past": "L'heure du rendez-vous doit être dans le futur.",
   "booking.braider_not_payable": "Ce ou cette braideur/braideuse ne peut pas accepter de paiements pour le moment. Veuillez réessayer plus tard.",
+  "booking.self_booking_not_allowed": "Vous ne pouvez pas réserver votre propre profil de braideur/braideuse.",
   "booking.price_drift": "Le prix a changé depuis la création de votre devis. Veuillez demander un nouveau devis et réessayer.",
   "booking.slot_unavailable": "Ce créneau vient d'être réservé par quelqu'un d'autre. Veuillez choisir un autre horaire.",
   "booking.terms_not_accepted": "Vous devez accepter les conditions pour finaliser cette réservation.",

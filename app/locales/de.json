@@ -142,6 +142,7 @@
   "booking.not_found": "Diese Buchung existiert nicht.",
   "booking.starts_in_past": "Der Termin muss in der Zukunft liegen.",
   "booking.braider_not_payable": "Diese Braiderin/dieser Braider kann derzeit keine Zahlungen entgegennehmen. Bitte versuchen Sie es später erneut.",
+  "booking.self_booking_not_allowed": "Sie können Ihr eigenes Braider-Profil nicht buchen.",
   "booking.price_drift": "Der Preis hat sich seit Erstellung Ihres Angebots geändert. Bitte fordern Sie ein neues Angebot an und versuchen Sie es erneut.",
   "booking.slot_unavailable": "Dieser Termin wurde soeben von jemand anderem gebucht. Bitte wählen Sie einen anderen Termin.",
   "booking.terms_not_accepted": "Sie müssen die Bedingungen akzeptieren, um diese Buchung abzuschließen.",

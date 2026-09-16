@@ -29,6 +29,7 @@ from app.core.exceptions import (
     BraiderNotFoundError,
     BraiderNotPayableError,
     InvalidBookingDateRangeError,
+    SelfBookingNotAllowedError,
     UserNotFoundError,
 )
 from app.core.i18n import localize_field
@@ -176,6 +177,9 @@ async def create_booking(
     # style, mobile radius, country resolution) against *current* state - a
     # calculation is only ever an input echo, never authorization on its own.
     resolved = await calculations_service.resolve_calculation_input(db, calc_input)
+
+    if resolved.braider_user_id == user.id:
+        raise SelfBookingNotAllowedError()
 
     connect_account = await payment_setup_repo.get_by_braider_id(db, resolved.braider_id)
     if connect_account is None or not (
