@@ -19,6 +19,7 @@ from app.modules.users import repository as users_repo
 from app.modules.users.models import UserType
 from app.modules.users.schemas import (
     AdminUserResponse,
+    AdminUserStatsResponse,
     UserProfileUpdateRequest,
     UserPublic,
 )
@@ -104,6 +105,15 @@ async def list_admin_users(
         ],
         pagination=meta,
     )
+
+
+async def get_admin_user_stats(
+    db: AsyncSession, *, user_type: UserType | None
+) -> AdminUserStatsResponse:
+    counts = await users_repo.count_users_by_active(db, user_type=user_type)
+    active = counts.get(True, 0)
+    inactive = counts.get(False, 0)
+    return AdminUserStatsResponse(total=active + inactive, active=active, inactive=inactive)
 
 
 async def suspend_user(

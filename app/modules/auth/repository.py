@@ -1,7 +1,7 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.pagination import PaginationMeta, PaginationParams, paginate
@@ -144,3 +144,26 @@ async def list_admin_invites(
 ) -> tuple[list[AdminInvite], PaginationMeta]:
     stmt = select(AdminInvite).order_by(AdminInvite.created_at.desc())
     return await paginate(db, stmt, params)
+
+
+async def count_admin_invites_by_status(db: AsyncSession) -> dict[str, int]:
+    """Counts mirror `_admin_invite_status` precedence: accepted, then revoked, then expired."""
+    now = datetime.now(UTC)
+    not_accepted = AdminInvite.accepted_at.is_(None)
+    not_revoked = AdminInvite.revoked_at.is_(None)
+    result = await db.execute(
+        select(
+            func.count(),
+            func.count().filter(AdminInvite.accepted_at.is_not(None)),
+            func.count().filter(not_accepted, AdminInvite.revoked_at.is_not(None)),
+            func.count().filter(not_accepted, not_revoked, AdminInvite.expires_at < now),
+        )
+    )
+    total, accepted, revoked, expired = result.one()
+    return {
+        "total": total,
+        "accepted": accepted,
+        "revoked": revoked,
+        "expired": expired,
+        "pending": total - accepted - revoked - expired,
+    }

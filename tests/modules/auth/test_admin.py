@@ -232,6 +232,35 @@ async def test_list_invites_shows_pending_and_accepted(
     assert by_email["accepted@example.com"] == "ACCEPTED"
 
 
+async def test_invite_stats_counts_pending_as_active(
+    client: AsyncClient, db_session: AsyncSession, fake_queue
+):
+    _, token = await create_user_with_token(db_session, user_type=UserType.ADMIN)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    pending_resp = await client.post(
+        INVITE_URL, json={"email": "stats-pending@example.com"}, headers=headers
+    )
+    assert pending_resp.status_code == 201
+
+    raw_token = await _invite(client, db_session, fake_queue, email="stats-accepted@example.com")
+    await client.post(
+        ACCEPT_URL,
+        json={"token": raw_token, "first_name": "Nyla", "password": "Password123"},
+    )
+
+    resp = await client.get(f"{INVITE_URL}/stats", headers=headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"] == {
+        "total": 2,
+        "active": 1,
+        "inactive": 1,
+        "accepted": 1,
+        "expired": 0,
+        "revoked": 0,
+    }
+
+
 async def test_list_invites_requires_admin(client: AsyncClient, db_session: AsyncSession):
     _, token = await create_user_with_token(db_session, user_type=UserType.CUSTOMER)
     resp = await client.get(INVITE_URL, headers={"Authorization": f"Bearer {token}"})

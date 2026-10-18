@@ -103,6 +103,12 @@ class AdminUserResponse(BaseModel):
     created_at: datetime
 
 
+class AdminUserStatsResponse(BaseModel):
+    total: int
+    active: int
+    inactive: int
+
+
 class SuspendUserRequest(BaseModel):
     reason: str | None = Field(default=None, description="Shown to the user on their next login attempt.")
 

@@ -29,3 +29,27 @@ async def test_admin_braider_user_list_includes_braider_id(
     by_user_id = {item["id"]: item for item in items}
     assert by_user_id[str(braider["user"].id)]["braider_id"] == str(braider["braider_id"])
     assert by_user_id[str(bare_braider_user.id)]["braider_id"] is None
+
+
+async def test_admin_user_stats_split_active_and_suspended(
+    client: AsyncClient, db_session: AsyncSession
+):
+    active_customer, _ = await create_user_with_token(db_session, user_type=UserType.CUSTOMER)
+    suspended_customer, _ = await create_user_with_token(db_session, user_type=UserType.CUSTOMER)
+    await create_user_with_token(db_session, user_type=UserType.BRAIDER)
+    _, admin_token = await create_user_with_token(db_session, user_type=UserType.ADMIN)
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    suspend = await client.post(
+        f"{ADMIN_USERS_URL}/{suspended_customer.id}/suspend", json={}, headers=headers
+    )
+    assert suspend.status_code == 200, suspend.text
+
+    resp = await client.get(
+        f"{ADMIN_USERS_URL}/stats", params={"user_type": "CUSTOMER"}, headers=headers
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"] == {"total": 2, "active": 1, "inactive": 1}
+
+    resp = await client.get(f"{ADMIN_USERS_URL}/stats", headers=headers)
+    assert resp.json()["data"] == {"total": 4, "active": 3, "inactive": 1}

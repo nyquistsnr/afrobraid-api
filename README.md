@@ -6,6 +6,12 @@
 
 # python -m scripts.seed_styles
 
+# python -m scripts.seed_braiders               (1,000 braiders across DE/FR/GB; --count N for more)
+
+# python -m scripts.link_seed_braiders_stripe   (real, auto-verified Stripe TEST Connect accounts for the seeded braiders)
+
+# python -m scripts.prune_seed_braiders --keep 1000   (--keep N and/or --linked-only)
+
 # 1. Google — easiest, works in a browser right now
 
 Google issues an ID token (a signed JWT) straight to client-side JavaScript after sign-in — no server-side secret needed for this step. I built you a small local test page for exactly this: dev-tools/social-login-test/google.html. It's already open in the Browser pane.

@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.pagination import PaginationMeta, PaginationParams, paginate
@@ -57,6 +57,16 @@ async def list_users(
         stmt = stmt.where(User.user_type == user_type)
     stmt = stmt.order_by(User.created_at.desc())
     return await paginate(db, stmt, params)
+
+
+async def count_users_by_active(
+    db: AsyncSession, *, user_type: UserType | None
+) -> dict[bool, int]:
+    stmt = select(User.is_active, func.count()).group_by(User.is_active)
+    if user_type is not None:
+        stmt = stmt.where(User.user_type == user_type)
+    result = await db.execute(stmt)
+    return {is_active: count for is_active, count in result.all()}
 
 
 async def get_user_by_phone(db: AsyncSession, phone_number: str) -> User | None:

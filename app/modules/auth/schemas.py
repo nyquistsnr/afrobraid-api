@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.modules.braiders.models import OnboardingStep
 from app.modules.users.schemas import UserPublic
@@ -141,6 +141,15 @@ class AdminInviteStatus(str, enum.Enum):
     ACCEPTED = "ACCEPTED"
     EXPIRED = "EXPIRED"
     REVOKED = "REVOKED"
+
+
+class AdminInviteStatsResponse(BaseModel):
+    total: int
+    active: int = Field(description="Invites still awaiting acceptance (PENDING).")
+    inactive: int = Field(description="Accepted, expired or revoked invites.")
+    accepted: int
+    expired: int
+    revoked: int
 
 
 class AdminInviteListItem(BaseModel):

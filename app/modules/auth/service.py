@@ -42,6 +42,7 @@ from app.modules.auth.schemas import (
     AdminInviteListItem,
     AdminInviteRequest,
     AdminInviteResponse,
+    AdminInviteStatsResponse,
     AdminInviteStatus,
     AdminSocialLoginRequest,
     AuthTokenResponse,
@@ -524,6 +525,18 @@ async def list_admin_invites(
             for invite in items
         ],
         pagination=meta,
+    )
+
+
+async def get_admin_invite_stats(db: AsyncSession) -> AdminInviteStatsResponse:
+    counts = await auth_repo.count_admin_invites_by_status(db)
+    return AdminInviteStatsResponse(
+        total=counts["total"],
+        active=counts["pending"],
+        inactive=counts["total"] - counts["pending"],
+        accepted=counts["accepted"],
+        expired=counts["expired"],
+        revoked=counts["revoked"],
     )
 
 

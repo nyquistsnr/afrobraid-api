@@ -151,19 +151,20 @@ def _charge_off_session_sync(
     metadata: dict[str, str],
     idempotency_key: str,
 ) -> PaymentIntentResult:
-    # Unlike the on-session intent above, this one explicitly pins
-    # payment_method_types to ["card"] (design correction #13) - PayPal,
-    # iDEAL, Bancontact etc. give no reusable off-session mandate, so
-    # letting Stripe's dynamic payment methods pick one here would be wrong
-    # even though it's what create_payment_intent wants for the on-session
-    # deposit/full charge.
+    # Pins payment_method_types to the saved method's own type rather than
+    # leaving dynamic payment methods on (which would need a return_url for
+    # redirect-capable methods) or hardcoding ["card"] (which rejects a
+    # PayPal/Link/SEPA method the deposit legitimately saved). Whatever the
+    # deposit saved under setup_future_usage="off_session" is reusable by
+    # construction - Stripe only offers reusable methods with that flag.
+    payment_method = stripe.PaymentMethod.retrieve(payment_method_id)
     try:
         intent = stripe.PaymentIntent.create(
             amount=amount_minor,
             currency=currency.lower(),
             customer=customer_id,
             payment_method=payment_method_id,
-            payment_method_types=["card"],
+            payment_method_types=[payment_method.type],
             off_session=True,
             confirm=True,
             metadata=metadata,

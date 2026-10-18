@@ -298,3 +298,38 @@ async def test_resume_payment_rejects_full_upfront_booking(
     resp = await client.post(f"{BOOKINGS_URL}/{booking_id}/pay", headers=headers)
     assert resp.status_code == 409
     assert resp.json()["error"]["code"] == "BOOKING_PAYMENT_NOT_RESUMABLE"
+
+
+@pytest.mark.parametrize("pm_type", ["card", "paypal"])
+async def test_off_session_charge_uses_saved_payment_method_type(monkeypatch, pm_type):
+    """Regression: the balance charge used to hardcode payment_method_types=["card"],
+    so a deposit paid (and saved) via PayPal could never be charged off-session."""
+    captured: dict = {}
+
+    class FakePaymentMethod:
+        type = pm_type
+
+    class FakeIntent:
+        id = "pi_fake"
+        client_secret = "pi_fake_secret"
+        latest_charge = "ch_fake"
+
+    def fake_create(**kwargs):
+        captured.update(kwargs)
+        return FakeIntent()
+
+    monkeypatch.setattr(payments_client.stripe.PaymentMethod, "retrieve", lambda pm_id: FakePaymentMethod())
+    monkeypatch.setattr(payments_client.stripe.PaymentIntent, "create", fake_create)
+
+    result = payments_client._charge_off_session_sync(
+        amount_minor=10336,
+        currency="EUR",
+        customer_id="cus_fake",
+        payment_method_id="pm_fake",
+        metadata={},
+        idempotency_key="k",
+    )
+
+    assert captured["payment_method_types"] == [pm_type]
+    assert captured["off_session"] is True
+    assert result.charge_id == "ch_fake"

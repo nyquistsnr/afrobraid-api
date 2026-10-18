@@ -19,6 +19,7 @@ from app.modules.auth.schemas import (
     AdminInviteListItem,
     AdminInviteRequest,
     AdminInviteResponse,
+    AdminInviteStatsResponse,
     AdminSocialLoginRequest,
     AuthTokenResponse,
     LoginRequest,
@@ -77,6 +78,21 @@ async def list_admin_invites(
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[PaginatedData[AdminInviteListItem]]:
     result = await service.list_admin_invites(db, params=params)
+    return APIResponse(data=result)
+
+
+@router.get(
+    "/invites/stats",
+    response_model=APIResponse[AdminInviteStatsResponse],
+    summary="Count admin invites by status",
+    description="Admin-only. `active` is invites still awaiting acceptance (PENDING); "
+    "`inactive` is everything accepted, expired or revoked.",
+)
+async def admin_invite_stats(
+    admin: User = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[AdminInviteStatsResponse]:
+    result = await service.get_admin_invite_stats(db)
     return APIResponse(data=result)
 
 
