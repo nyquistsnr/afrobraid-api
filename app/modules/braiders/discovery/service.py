@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import storage
+from app.core.cache_tags import BRAIDER_ACCOUNTS, BRAIDERS, CATALOG, braider_tag
 from app.core.exceptions import (
     BraiderNotFoundError,
     InvalidSearchDateRangeError,
@@ -18,6 +19,7 @@ from app.core.exceptions import (
 )
 from app.core.i18n import localize_field
 from app.core.pagination import PaginatedData, PaginationMeta, PaginationParams
+from app.core.query_cache import cached
 from app.modules.braiders.discovery import repository as discovery_repo
 from app.modules.braiders.discovery.schemas import (
     BraiderDetailResponse,
@@ -52,12 +54,26 @@ _TRENDING_WINDOW_DAYS = 30
 # be useful on a map, far enough not to pinpoint a home address.
 _HOME_LOCATION_FUZZ_RADIUS_M = 400
 
+# Listings change whenever any braider (or the style catalogue) does - those
+# writes invalidate them instantly (app.core.cache_tags), so the TTL is only
+# the backstop for time-window drift (the "new" window) and booking counts
+# (trending), which deliberately don't invalidate.
+_LISTING_CACHE_TTL_SECONDS = 10 * 60
+_TRENDING_CACHE_TTL_SECONDS = 5 * 60
+_DETAIL_CACHE_TTL_SECONDS = 60 * 60
+
+
+def _listing_tags(_args) -> list[str]:
+    return [CATALOG, BRAIDERS, BRAIDER_ACCOUNTS]
+
 
 def _fuzz_coordinates(lat: Decimal, lng: Decimal) -> tuple[Decimal, Decimal]:
     """Offsets a coordinate by up to `_HOME_LOCATION_FUZZ_RADIUS_M` meters in a
     random direction, freshly drawn on every call - the same braider's fuzzed
-    point moves between requests instead of staying fixed, so repeated queries
-    can't be used to triangulate the real one. The sqrt on the radial draw makes
+    point moves between cache fills instead of staying fixed forever, so
+    repeated queries can't be used to triangulate the real one. (Discovery
+    responses are cached, so within one cache entry's lifetime the point is
+    stable - which only makes averaging harder, never easier.) The sqrt on the radial draw makes
     the offset uniform over the disc's area instead of clustering near the true
     point."""
     u1 = random.random()
@@ -194,6 +210,7 @@ async def _rows_to_items(
     return items
 
 
+@cached(name="braiders.search_braiders", ttl_seconds=_LISTING_CACHE_TTL_SECONDS, tags=_listing_tags)
 async def search_braiders(
     db: AsyncSession,
     *,
@@ -261,6 +278,7 @@ async def search_braiders(
     return PaginatedData(items=items, pagination=meta)
 
 
+@cached(name="braiders.list_new_braiders", ttl_seconds=_LISTING_CACHE_TTL_SECONDS, tags=_listing_tags)
 async def list_new_braiders(
     db: AsyncSession,
     *,
@@ -283,6 +301,7 @@ async def list_new_braiders(
     return PaginatedData(items=items, pagination=meta)
 
 
+@cached(name="braiders.list_top_rated_braiders", ttl_seconds=_LISTING_CACHE_TTL_SECONDS, tags=_listing_tags)
 async def list_top_rated_braiders(
     db: AsyncSession,
     *,
@@ -304,6 +323,7 @@ async def list_top_rated_braiders(
     return PaginatedData(items=items, pagination=meta)
 
 
+@cached(name="braiders.list_trending_braiders", ttl_seconds=_TRENDING_CACHE_TTL_SECONDS, tags=_listing_tags)
 async def list_trending_braiders(
     db: AsyncSession,
     *,
@@ -328,6 +348,7 @@ async def list_trending_braiders(
     return PaginatedData(items=items, pagination=meta)
 
 
+@cached(name="braiders.list_recommended_braiders", ttl_seconds=_LISTING_CACHE_TTL_SECONDS, tags=_listing_tags)
 async def list_recommended_braiders(
     db: AsyncSession,
     *,
@@ -350,6 +371,11 @@ async def list_recommended_braiders(
     return PaginatedData(items=items, pagination=meta)
 
 
+@cached(
+    name="braiders.get_braider_detail",
+    ttl_seconds=_DETAIL_CACHE_TTL_SECONDS,
+    tags=lambda a: [CATALOG, BRAIDER_ACCOUNTS, braider_tag(a["braider_id"])],
+)
 async def get_braider_detail(
     db: AsyncSession, braider_id: uuid.UUID, *, locale: str
 ) -> BraiderDetailResponse:

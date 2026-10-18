@@ -3,10 +3,12 @@ import uuid
 from arq import ArqRedis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.cache_tags import CUSTOMER_NAMES, REVIEWS, braider_tag, reviews_tag
 from app.core.config import get_settings
 from app.core.exceptions import BraiderNotFoundError, ReviewNotEligibleError, ReviewNotFoundError
 from app.core.i18n import localize_field
 from app.core.pagination import PaginatedData, PaginationParams
+from app.core.query_cache import cached
 from app.modules.braiders import repository as braiders_repo
 from app.modules.braiders.models import BioSource
 from app.modules.reviews import repository as reviews_repo
@@ -169,6 +171,16 @@ async def get_my_review(
     return _to_response(review)
 
 
+@cached(
+    name="reviews.list_public_reviews",
+    ttl_seconds=60 * 60,
+    tags=lambda a: [
+        REVIEWS,
+        CUSTOMER_NAMES,
+        reviews_tag(a["braider_id"]),
+        braider_tag(a["braider_id"]),
+    ],
+)
 async def list_public_reviews(
     db: AsyncSession, braider_id: uuid.UUID, *, params: PaginationParams, locale: str
 ) -> PaginatedData[PublicReviewResponse]:
