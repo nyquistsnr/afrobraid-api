@@ -11,6 +11,7 @@ section: "the highest-leverage test decision").
 import asyncio
 import uuid
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 import stripe
@@ -325,6 +326,24 @@ async def retrieve_payment_intent(payment_intent_id: str) -> Any:
         return await asyncio.to_thread(_retrieve_payment_intent_sync, payment_intent_id)
     except stripe.error.StripeError as exc:
         raise StripeApiError(f"Stripe payment intent retrieval failed: {exc}") from exc
+
+
+def _cancel_payment_intent_sync(payment_intent_id: str) -> Any:
+    return stripe.PaymentIntent.cancel(payment_intent_id, cancellation_reason="abandoned")
+
+
+async def cancel_payment_intent(payment_intent_id: str) -> Any:
+    """Cancels a still-confirmable PaymentIntent (requires_payment_method /
+    requires_confirmation / requires_action). Stripe rejects the cancel once
+    an intent is processing or succeeded, which surfaces here as
+    StripeApiError - callers rely on that as the guard against canceling a
+    payment that just went through."""
+    if _IS_TEST_ENV:
+        return SimpleNamespace(id=payment_intent_id, status="canceled")
+    try:
+        return await asyncio.to_thread(_cancel_payment_intent_sync, payment_intent_id)
+    except stripe.error.StripeError as exc:
+        raise StripeApiError(f"Stripe payment intent cancel failed: {exc}") from exc
 
 
 def _retrieve_payments_event_sync(event_id: str) -> Any:

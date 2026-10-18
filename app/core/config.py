@@ -100,6 +100,11 @@ class Settings(BaseSettings):
     # would land past the hard deadline below) -> CANCELLED_NO_PAYMENT.
     booking_balance_retry_offsets_hours: list[int] = [2, 6, 12]
     booking_balance_hard_deadline_hours_before_start: int = 4
+    # A customer-initiated (on-session, POST /bookings/{id}/pay) balance
+    # attempt idle this long is treated as abandoned: its PaymentIntent is
+    # canceled and the booking goes back to the retry ladder above, so the
+    # IN_PROGRESS it set can't stall the automatic charge forever.
+    booking_balance_on_session_abandon_after_minutes: int = 60
     # How long after a booking's appointment ends before the braider's
     # payout releases - covers the near-term dispute window (plan design
     # correction #6); full chargeback protection is the transfer-reversal

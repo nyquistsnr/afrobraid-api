@@ -108,6 +108,17 @@ class BookingResponse(BaseModel):
     cancelled_by: CancelledBy | None
     cancellation_reason: str | None
     payments: list[BookingPaymentResponse]
+    # The balance-charge lifecycle, so the customer app can tell a booking
+    # whose automatic balance charge failed (attempts > 0 with a last error,
+    # back to SCHEDULED for the next retry - FAILED is never persisted) apart
+    # from one that's simply waiting for its first attempt.
+    # `balance_charge_last_error_code` is Stripe's code from the latest failed
+    # BALANCE attempt (e.g. `card_declined`, `authentication_required`).
+    balance_charge_state: BalanceChargeState
+    balance_charge_due_at: datetime | None
+    balance_charge_attempts: int
+    balance_charge_last_error: str | None
+    balance_charge_last_error_code: str | None
     created_at: datetime
 
 

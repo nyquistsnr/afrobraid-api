@@ -151,9 +151,12 @@ async def reschedule_booking(
         "remaining balance and returns its client_secret to confirm - for "
         "when the scheduled off-session charge needs a customer-present 3DS "
         "confirmation, or the customer just wants to pay before the next "
-        "scheduled attempt. 409s if there's no outstanding balance to "
-        "resume (already paid, not a deposit-then-balance booking, or a "
-        "charge is already in flight)."
+        "scheduled attempt. Calling it again after an abandoned or declined "
+        "on-session attempt returns that same PaymentIntent's client_secret "
+        "so the customer can retry with another payment method. The secret "
+        "is on the BALANCE entry in `payments`. 409s if there's no "
+        "outstanding balance to resume (already paid, not a "
+        "deposit-then-balance booking, or an automatic charge is in flight)."
     ),
 )
 async def resume_booking_payment(

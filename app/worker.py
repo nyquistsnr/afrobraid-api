@@ -19,6 +19,7 @@ from app.modules.bookings.calculations.cron import expire_booking_calculations_c
 from app.modules.bookings.cron import (
     complete_due_bookings_cron,
     expire_booking_holds_cron,
+    release_abandoned_balance_payments_cron,
     release_due_payouts_cron,
     start_due_bookings_cron,
     sweep_balance_charges_cron,
@@ -99,6 +100,8 @@ class WorkerSettings:
         cron(expire_booking_holds_cron, second=0),
         # The primary balance driver (plan: every 5m).
         cron(sweep_balance_charges_cron, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
+        # Unsticks bookings left IN_PROGRESS by an abandoned POST /{id}/pay.
+        cron(release_abandoned_balance_payments_cron, minute={7, 22, 37, 52}),
         # Booking lifecycle + payout release (plan: every 15m).
         cron(start_due_bookings_cron, minute={0, 15, 30, 45}),
         cron(complete_due_bookings_cron, minute={0, 15, 30, 45}),

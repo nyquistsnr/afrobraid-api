@@ -30,6 +30,7 @@ from app.core.exceptions import (
     BraiderNotPayableError,
     InvalidBookingDateRangeError,
     SelfBookingNotAllowedError,
+    StripeApiUnavailableError,
     UserNotFoundError,
 )
 from app.core.i18n import localize_field
@@ -48,6 +49,7 @@ from app.modules.bookings.enums import (
     BookingStatus,
     PaymentPurpose,
     PaymentSchedule,
+    PaymentStatus,
     RefundStatus,
 )
 from app.modules.bookings.models import Booking, BookingItem, BookingPayment, CancelledBy
@@ -361,7 +363,16 @@ async def _to_response(
     payment: BookingPayment | None = None,
 ) -> BookingResponse:
     items = await bookings_repo.list_items(db, booking.id)
-    payments = await bookings_repo.list_payments(db, booking.id) if payment is None else [payment]
+    all_payments = await bookings_repo.list_payments(db, booking.id)
+    payments = all_payments if payment is None else [payment]
+    last_failed_balance = next(
+        (
+            p
+            for p in reversed(all_payments)
+            if p.purpose == PaymentPurpose.BALANCE and p.status == PaymentStatus.FAILED
+        ),
+        None,
+    )
     style = await styles_repo.get_style_by_id(db, booking.style_id)
     style_name = (localize_field(style, "name", locale) or style.name_en) if style else ""
     braider_names = await braiders_repo.list_display_names(db, [booking.braider_id])
@@ -411,6 +422,11 @@ async def _to_response(
             )
             for p in payments
         ],
+        balance_charge_state=booking.balance_charge_state,
+        balance_charge_due_at=booking.balance_charge_due_at,
+        balance_charge_attempts=booking.balance_charge_attempts,
+        balance_charge_last_error=booking.balance_charge_last_error,
+        balance_charge_last_error_code=last_failed_balance.failure_code if last_failed_balance else None,
         created_at=booking.created_at,
     )
 
@@ -550,9 +566,11 @@ async def resume_booking_payment(
 
     Marks the charge IN_PROGRESS so the sweeper cron won't also fire an
     off-session attempt concurrently. If the customer abandons this flow
-    without confirming, the booking stays IN_PROGRESS until a reconciliation
-    sweep (Phase 7, not yet built) reclaims it - a known, accepted gap for
-    now, no worse than an abandoned checkout hold before it.
+    (or their card is declined on-session), the booking stays IN_PROGRESS -
+    calling this again hands back the same still-confirmable PaymentIntent
+    (see _reusable_on_session_balance_intent) instead of 409ing, so the
+    customer can always retry with another card. An off-session attempt
+    that's genuinely in flight still 409s.
     """
     booking = await bookings_repo.get_booking_by_id_for_update(db, booking_id)
     if booking is None or booking.customer_id != user.id:
@@ -561,21 +579,36 @@ async def resume_booking_payment(
     if (
         booking.payment_schedule != PaymentSchedule.DEPOSIT_THEN_BALANCE
         or booking.status != BookingStatus.CONFIRMED
-        or booking.balance_charge_state not in (BalanceChargeState.SCHEDULED, BalanceChargeState.DUE)
+        or booking.balance_charge_state
+        not in (BalanceChargeState.SCHEDULED, BalanceChargeState.DUE, BalanceChargeState.IN_PROGRESS)
     ):
         raise BookingPaymentNotResumableError()
+
+    if booking.balance_charge_state == BalanceChargeState.IN_PROGRESS:
+        reusable = await _reusable_on_session_balance_intent(db, booking)
+        if reusable is None:
+            raise BookingPaymentNotResumableError()
+        payment, client_secret = reusable
+        if payment is not None:
+            await db.commit()
+            return await _to_response(db, booking, locale=locale, client_secret=client_secret, payment=payment)
+        # Otherwise the previous on-session intent was canceled at Stripe -
+        # fall through and start a fresh attempt.
 
     attempt_number = booking.balance_charge_attempts + 1
     idempotency_key = f"booking:{booking.id}:balance:{attempt_number}"
     transfer_group = f"booking_{booking.id}"
 
-    intent = await payments_client.create_payment_intent(
-        amount_minor=to_minor_units(booking.balance_amount),
-        currency=booking.currency.value,
-        customer_id=booking.stripe_customer_id,
-        metadata={"booking_id": str(booking.id), "purpose": PaymentPurpose.BALANCE.value},
-        off_session_setup=False,
-    )
+    try:
+        intent = await payments_client.create_payment_intent(
+            amount_minor=to_minor_units(booking.balance_amount),
+            currency=booking.currency.value,
+            customer_id=booking.stripe_customer_id,
+            metadata={"booking_id": str(booking.id), "purpose": PaymentPurpose.BALANCE.value},
+            off_session_setup=False,
+        )
+    except payments_client.StripeApiError as exc:
+        raise StripeApiUnavailableError() from exc
 
     payment = await bookings_repo.create_payment(
         db,
@@ -597,6 +630,52 @@ async def resume_booking_payment(
     await db.commit()
 
     return await _to_response(db, booking, locale=locale, client_secret=intent.client_secret, payment=payment)
+
+
+# PaymentIntent statuses the customer can still (re)confirm client-side - a
+# declined on-session confirmation drops back to requires_payment_method.
+_CONFIRMABLE_INTENT_STATUSES = frozenset({"requires_payment_method", "requires_confirmation", "requires_action"})
+
+
+async def _reusable_on_session_balance_intent(
+    db: AsyncSession, booking: Booking
+) -> tuple[BookingPayment | None, str | None] | None:
+    """For a booking already IN_PROGRESS: if that's because of an earlier
+    customer-initiated (on-session) attempt, returns `(payment, client_secret)`
+    for its still-confirmable PaymentIntent, or `(None, None)` if that intent
+    was canceled and a fresh one should be created. Returns None when the
+    in-flight attempt must not be raced - the sweeper's off-session charge,
+    or an on-session intent that's already succeeded/processing (the
+    webhook settles those)."""
+    payments = await bookings_repo.list_payments(db, booking.id)
+    latest = next((p for p in reversed(payments) if p.purpose == PaymentPurpose.BALANCE), None)
+    if (
+        latest is None
+        or latest.is_off_session
+        or latest.stripe_payment_intent_id is None
+        or latest.status == PaymentStatus.SUCCEEDED
+    ):
+        return None
+
+    try:
+        intent = await payments_client.retrieve_payment_intent(latest.stripe_payment_intent_id)
+    except payments_client.StripeApiError as exc:
+        raise StripeApiUnavailableError() from exc
+
+    if intent.status in _CONFIRMABLE_INTENT_STATUSES:
+        # A decline's payment_intent.payment_failed webhook marks the row
+        # FAILED, but the intent itself is still retryable.
+        latest.status = PaymentStatus.PENDING
+        # Explicit bump (a PENDING -> PENDING write wouldn't fire onupdate):
+        # resuming restarts release_abandoned_balance_payment's idle clock.
+        latest.updated_at = datetime.now(UTC)
+        await db.flush()
+        return latest, intent.client_secret
+    if intent.status == "canceled":
+        latest.status = PaymentStatus.CANCELED
+        await db.flush()
+        return None, None
+    return None
 
 
 async def cancel_booking_by_customer(

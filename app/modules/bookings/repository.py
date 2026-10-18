@@ -198,6 +198,31 @@ async def list_stale_pending_payments(
     return list(result.scalars().all())
 
 
+async def list_bookings_with_abandoned_on_session_balance(
+    db: AsyncSession, *, idle_since: datetime, limit: int
+) -> list[uuid.UUID]:
+    """Candidates for release_abandoned_balance_payment: bookings still
+    IN_PROGRESS on a customer-initiated (on-session) BALANCE payment that
+    hasn't been touched since `idle_since` - `updated_at` moves whenever
+    the customer resumes it (POST /pay) or a decline webhook lands. Only a
+    candidate list; the release re-checks everything under FOR UPDATE."""
+    result = await db.execute(
+        select(Booking.id)
+        .join(BookingPayment, BookingPayment.booking_id == Booking.id)
+        .where(
+            Booking.balance_charge_state == BalanceChargeState.IN_PROGRESS,
+            BookingPayment.purpose == PaymentPurpose.BALANCE,
+            BookingPayment.is_off_session.is_(False),
+            BookingPayment.status.in_((PaymentStatus.PENDING, PaymentStatus.FAILED)),
+            BookingPayment.stripe_payment_intent_id.is_not(None),
+            BookingPayment.updated_at <= idle_since,
+        )
+        .distinct()
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
 async def list_pending_payments_for_booking(db: AsyncSession, booking_id: uuid.UUID) -> list[BookingPayment]:
     """Admin-triggered reconciliation for one booking - unlike the cron,
     ignores the age threshold since an admin explicitly asked for this

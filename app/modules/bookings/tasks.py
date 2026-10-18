@@ -348,6 +348,100 @@ async def _handle_balance_charge_failure(
     )
 
 
+# Statuses Stripe still lets us cancel. processing/succeeded are never
+# touched here - the webhook (or reconcile_stripe_payments_cron) settles those.
+_CANCELABLE_INTENT_STATUSES = frozenset({"requires_payment_method", "requires_confirmation", "requires_action"})
+
+
+async def release_abandoned_balance_payment(
+    ctx: dict, db, booking_id: uuid.UUID, *, idle_since: datetime
+) -> bool:
+    """Undoes the IN_PROGRESS a customer-initiated POST /{id}/pay set, once
+    that on-session attempt has sat idle past
+    booking_balance_on_session_abandon_after_minutes. Without this the
+    sweeper (which only claims SCHEDULED) never retries the balance and the
+    hard-deadline cancellation never fires. Cancels the PaymentIntent first
+    so a late confirmation can't charge after the booking has moved on.
+
+    Back to SCHEDULED: keeping the original due date if it's still ahead
+    (the customer just tried to pay early), else the next retry-ladder slot
+    - or ABANDONED + CANCELLED_NO_PAYMENT when none is left, exactly as a
+    failed off-session attempt would. Returns whether anything changed."""
+    booking = await bookings_repo.get_booking_by_id_for_update(db, booking_id)
+    if (
+        booking is None
+        or booking.status != BookingStatus.CONFIRMED
+        or booking.balance_charge_state != BalanceChargeState.IN_PROGRESS
+    ):
+        await db.rollback()
+        return False
+
+    payments = await bookings_repo.list_payments(db, booking.id)
+    payment = next((p for p in reversed(payments) if p.purpose == PaymentPurpose.BALANCE), None)
+    if (
+        payment is None
+        or payment.is_off_session
+        or payment.stripe_payment_intent_id is None
+        or payment.status not in (PaymentStatus.PENDING, PaymentStatus.FAILED)
+        or payment.updated_at > idle_since
+    ):
+        await db.rollback()
+        return False
+
+    intent = await payments_client.retrieve_payment_intent(payment.stripe_payment_intent_id)
+    if intent.status in _CANCELABLE_INTENT_STATUSES:
+        # Raises StripeApiError if the customer confirmed in the meantime -
+        # the caller logs it and the booking is left alone.
+        await payments_client.cancel_payment_intent(payment.stripe_payment_intent_id)
+    elif intent.status != "canceled":
+        await db.rollback()
+        return False
+
+    was_declined = payment.status == PaymentStatus.FAILED
+    if not was_declined:
+        payment.status = PaymentStatus.CANCELED
+
+    now = datetime.now(UTC)
+    if booking.balance_charge_due_at is not None and booking.balance_charge_due_at > now:
+        next_due_at = booking.balance_charge_due_at
+    else:
+        next_due_at = _next_balance_retry_at(
+            now=now, starts_at=booking.starts_at, attempt_number=payment.attempt_number
+        )
+
+    cancelled = next_due_at is None
+    if cancelled:
+        booking.balance_charge_state = BalanceChargeState.ABANDONED
+        booking.status = BookingStatus.CANCELLED_NO_PAYMENT
+        booking.cancelled_at = now
+        booking.cancelled_by = CancelledBy.SYSTEM
+    else:
+        booking.balance_charge_due_at = next_due_at
+        booking.balance_charge_state = BalanceChargeState.SCHEDULED
+    if was_declined and payment.failure_message:
+        booking.balance_charge_last_error = payment.failure_message[:500]
+
+    await db.commit()
+
+    if cancelled:
+        await ctx["redis"].enqueue_job(TASK_SEND_BOOKING_CANCELLED_NO_PAYMENT_EMAIL, booking_id=str(booking.id))
+    elif was_declined:
+        # A plain walk-away gets no email - the customer chose to pay early
+        # and the automatic charge simply goes ahead as scheduled.
+        await ctx["redis"].enqueue_job(
+            TASK_SEND_BALANCE_PAYMENT_FAILED_EMAIL,
+            booking_id=str(booking.id),
+            failure_code=payment.failure_code or "",
+            failure_message=payment.failure_message or "",
+        )
+    logger.info(
+        "Released abandoned on-session balance payment for booking %s (%s)",
+        booking.reference,
+        "cancelled" if cancelled else f"next attempt {next_due_at.isoformat()}",
+    )
+    return True
+
+
 async def charge_booking_balance_task(ctx: dict, *, booking_id: str) -> None:
     """Off-session-charges the remaining balance for a booking whose
     balance_charge_due_at has passed (enqueued by sweep_balance_charges_cron,

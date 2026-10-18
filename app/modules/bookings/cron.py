@@ -1,10 +1,17 @@
 import logging
+from datetime import UTC, datetime, timedelta
 
+from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
 from app.modules.bookings import repository as bookings_repo
-from app.modules.bookings.tasks import TASK_CHARGE_BOOKING_BALANCE, TASK_RELEASE_BOOKING_PAYOUT
+from app.modules.bookings.tasks import (
+    TASK_CHARGE_BOOKING_BALANCE,
+    TASK_RELEASE_BOOKING_PAYOUT,
+    release_abandoned_balance_payment,
+)
 
 logger = logging.getLogger("app.cron.bookings")
+settings = get_settings()
 
 _EXPIRE_BATCH_LIMIT = 5000
 _BALANCE_SWEEP_BATCH_LIMIT = 500
@@ -37,6 +44,29 @@ async def sweep_balance_charges_cron(ctx: dict) -> None:
         await ctx["redis"].enqueue_job(TASK_CHARGE_BOOKING_BALANCE, booking_id=str(booking_id))
     if claimed:
         logger.info("Enqueued %d due balance charges", len(claimed))
+
+
+async def release_abandoned_balance_payments_cron(ctx: dict) -> None:
+    """Hands bookings stuck IN_PROGRESS on an abandoned customer-initiated
+    balance payment back to the retry ladder (every 15m) - see
+    release_abandoned_balance_payment. Each booking gets its own
+    try/except so one Stripe error can't stall the batch."""
+    idle_since = datetime.now(UTC) - timedelta(minutes=settings.booking_balance_on_session_abandon_after_minutes)
+    async with AsyncSessionLocal() as db:
+        candidates = await bookings_repo.list_bookings_with_abandoned_on_session_balance(
+            db, idle_since=idle_since, limit=_BALANCE_SWEEP_BATCH_LIMIT
+        )
+        await db.rollback()
+        released = 0
+        for booking_id in candidates:
+            try:
+                if await release_abandoned_balance_payment(ctx, db, booking_id, idle_since=idle_since):
+                    released += 1
+            except Exception:
+                logger.exception("Releasing abandoned balance payment failed for booking %s", booking_id)
+                await db.rollback()
+    if candidates:
+        logger.info("Released %d of %d abandoned on-session balance payments", released, len(candidates))
 
 
 async def start_due_bookings_cron(ctx: dict) -> None:
