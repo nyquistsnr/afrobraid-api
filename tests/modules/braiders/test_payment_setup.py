@@ -4,7 +4,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.braiders.payment_setup import service as payment_setup_service
 from app.modules.braiders.payment_setup import webhook as payment_setup_webhook
-from app.modules.braiders.payment_setup.client import StripeWebhookSignatureError
+from app.modules.braiders.payment_setup.client import (
+    StripeApiError,
+    StripeNoExpressDashboardError,
+    StripeWebhookSignatureError,
+)
 from app.modules.users.models import UserType
 from tests.helpers import create_user_with_token
 
@@ -151,6 +155,45 @@ async def test_dashboard_link_works_even_before_onboarding_completes(
     resp = await client.post(DASHBOARD_LINK_URL, headers=headers)
     assert resp.status_code == 200, resp.text
     assert resp.json()["data"]["dashboard_url"] == "https://connect.stripe.com/app/express#acct_dash/balance"
+
+
+async def test_dashboard_link_falls_back_to_account_update_without_express_dashboard(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch
+):
+    _, token = await create_user_with_token(db_session, user_type=UserType.BRAIDER)
+    headers = {"Authorization": f"Bearer {token}"}
+    await _create_account(client, headers, monkeypatch, "acct_custom")
+
+    async def fake_create_login_link(account_id):
+        raise StripeNoExpressDashboardError("does not have access to the Express Dashboard")
+
+    async def fake_create_account_link(acc_id, *, refresh_url, return_url, link_type="account_onboarding"):
+        assert link_type == "account_update"
+        return f"https://connect.stripe.com/setup/c/{acc_id}"
+
+    monkeypatch.setattr(payment_setup_service, "create_login_link", fake_create_login_link)
+    monkeypatch.setattr(payment_setup_service, "create_account_link", fake_create_account_link)
+
+    resp = await client.post(DASHBOARD_LINK_URL, headers=headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["dashboard_url"] == "https://connect.stripe.com/setup/c/acct_custom"
+
+
+async def test_dashboard_link_other_stripe_errors_are_502(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch
+):
+    _, token = await create_user_with_token(db_session, user_type=UserType.BRAIDER)
+    headers = {"Authorization": f"Bearer {token}"}
+    await _create_account(client, headers, monkeypatch, "acct_down")
+
+    async def fake_create_login_link(account_id):
+        raise StripeApiError("boom")
+
+    monkeypatch.setattr(payment_setup_service, "create_login_link", fake_create_login_link)
+
+    resp = await client.post(DASHBOARD_LINK_URL, headers=headers)
+    assert resp.status_code == 502
+    assert resp.json()["error"]["code"] == "STRIPE_API_UNAVAILABLE"
 
 
 async def test_refresh_applies_enabled_state_and_completes_step(

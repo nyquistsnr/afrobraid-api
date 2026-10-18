@@ -16,6 +16,7 @@ from app.modules.braiders.models import OnboardingStep
 from app.modules.braiders.payment_setup import repository as payment_setup_repo
 from app.modules.braiders.payment_setup.client import (
     StripeApiError,
+    StripeNoExpressDashboardError,
     create_account_link,
     create_connect_account,
     create_login_link,
@@ -115,6 +116,19 @@ async def get_dashboard_link(db: AsyncSession, user_id: uuid.UUID) -> DashboardL
 
     try:
         dashboard_url = await create_login_link(account.stripe_account_id)
+    except StripeNoExpressDashboardError:
+        # Custom accounts (the seeded test braiders) have no Express Dashboard.
+        # Stripe's hosted account_update page - payout bank account and
+        # personal details - is the closest equivalent, same response shape.
+        try:
+            dashboard_url = await create_account_link(
+                account.stripe_account_id,
+                refresh_url=settings.stripe_connect_refresh_url,
+                return_url=settings.stripe_connect_return_url,
+                link_type="account_update",
+            )
+        except StripeApiError as exc:
+            raise StripeApiUnavailableError() from exc
     except StripeApiError as exc:
         raise StripeApiUnavailableError() from exc
 

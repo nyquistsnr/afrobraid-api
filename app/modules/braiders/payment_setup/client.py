@@ -18,6 +18,11 @@ class StripeApiError(Exception):
     pass
 
 
+class StripeNoExpressDashboardError(StripeApiError):
+    """The account has no Express Dashboard to log into - e.g. a Custom
+    account, which is what the seeded test braiders use."""
+
+
 class StripeWebhookSignatureError(Exception):
     pass
 
@@ -35,12 +40,14 @@ def _create_connect_account_sync(email: str, country: str) -> str:
     return account.id
 
 
-def _create_account_link_sync(account_id: str, *, refresh_url: str, return_url: str) -> str:
+def _create_account_link_sync(
+    account_id: str, *, refresh_url: str, return_url: str, link_type: str = "account_onboarding"
+) -> str:
     link = stripe.AccountLink.create(
         account=account_id,
         refresh_url=refresh_url,
         return_url=return_url,
-        type="account_onboarding",
+        type=link_type,
     )
     return link.url
 
@@ -61,10 +68,16 @@ async def create_connect_account(email: str, country: str) -> str:
         raise StripeApiError(f"Stripe account creation failed: {exc}") from exc
 
 
-async def create_account_link(account_id: str, *, refresh_url: str, return_url: str) -> str:
+async def create_account_link(
+    account_id: str, *, refresh_url: str, return_url: str, link_type: str = "account_onboarding"
+) -> str:
     try:
         return await asyncio.to_thread(
-            _create_account_link_sync, account_id, refresh_url=refresh_url, return_url=return_url
+            _create_account_link_sync,
+            account_id,
+            refresh_url=refresh_url,
+            return_url=return_url,
+            link_type=link_type,
         )
     except stripe.error.StripeError as exc:
         raise StripeApiError(f"Stripe account link creation failed: {exc}") from exc
@@ -80,6 +93,10 @@ async def retrieve_account(account_id: str) -> stripe.Account:
 async def create_login_link(account_id: str) -> str:
     try:
         return await asyncio.to_thread(_create_login_link_sync, account_id)
+    except stripe.error.InvalidRequestError as exc:
+        if "Express Dashboard" in str(exc):
+            raise StripeNoExpressDashboardError(str(exc)) from exc
+        raise StripeApiError(f"Stripe login link creation failed: {exc}") from exc
     except stripe.error.StripeError as exc:
         raise StripeApiError(f"Stripe login link creation failed: {exc}") from exc
 
