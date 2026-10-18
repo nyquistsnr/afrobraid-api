@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import storage
+from app.core.cache_tags import CATALOG
 from app.core.config import get_settings
 from app.core.exceptions import (
     AddOnNotFoundError,
@@ -20,6 +21,7 @@ from app.core.exceptions import (
 )
 from app.core.i18n import localize_field
 from app.core.pagination import PaginatedData, PaginationParams, paginate
+from app.core.query_cache import cached
 from app.modules.styles import repository as styles_repo
 from app.modules.styles.models import (
     AddOn,
@@ -242,6 +244,16 @@ def _to_addon_public_response(addon: AddOn, *, locale: str) -> AddOnPublicRespon
     )
 
 
+# The public catalogue only changes when an admin edits it (or a translation
+# lands), and every such write invalidates it instantly - see
+# app.core.cache_tags - so it can sit in Redis for a long time.
+_CATALOG_CACHE_TTL_SECONDS = 6 * 60 * 60
+
+
+def _catalog_tags(_args) -> list[str]:
+    return [CATALOG]
+
+
 # --- Categories ---------------------------------------------------------
 
 
@@ -250,6 +262,7 @@ async def list_categories(db: AsyncSession) -> list[StyleCategoryResponse]:
     return [_to_category_response(c) for c in categories]
 
 
+@cached(name="styles.list_categories_public", ttl_seconds=_CATALOG_CACHE_TTL_SECONDS, tags=_catalog_tags)
 async def list_categories_public(
     db: AsyncSession, *, locale: str
 ) -> list[StyleCategoryPublicResponse]:
@@ -330,6 +343,7 @@ async def get_style(db: AsyncSession, style_id: uuid.UUID) -> StyleResponse:
     return _to_style_response(style, images=images, variations=variations)
 
 
+@cached(name="styles.get_style_public", ttl_seconds=_CATALOG_CACHE_TTL_SECONDS, tags=_catalog_tags)
 async def get_style_public(db: AsyncSession, style_id: uuid.UUID, *, locale: str) -> StylePublicResponse:
     style = await styles_repo.get_style_by_id(db, style_id)
     if style is None:
@@ -370,6 +384,7 @@ async def list_styles(
     return PaginatedData(items=items, pagination=meta)
 
 
+@cached(name="styles.list_styles_public", ttl_seconds=_CATALOG_CACHE_TTL_SECONDS, tags=_catalog_tags)
 async def list_styles_public(
     db: AsyncSession,
     *,
@@ -657,6 +672,7 @@ async def list_addons(db: AsyncSession, *, only_active: bool) -> list[AddOnRespo
     return [_to_addon_response(a) for a in result.scalars().all()]
 
 
+@cached(name="styles.list_addons_public", ttl_seconds=_CATALOG_CACHE_TTL_SECONDS, tags=_catalog_tags)
 async def list_addons_public(
     db: AsyncSession, *, only_active: bool, locale: str
 ) -> list[AddOnPublicResponse]:

@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     database_url: str
     db_echo: bool = False
     redis_url: str
+    # Kill switch for the read-through query cache (app.core.query_cache) -
+    # flip off to send every cached read straight to Postgres again.
+    query_cache_enabled: bool = True
 
     @field_validator("database_url")
     @classmethod
