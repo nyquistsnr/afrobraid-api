@@ -32,6 +32,8 @@ No path/query params, no body.
 }
 ```
 
+**Accounts without an Express Dashboard** (Custom accounts - currently only the seeded test braiders, whose KYC is completed over the API): Stripe can't issue a dashboard login for these, so `dashboard_url` is instead a Stripe-hosted *account update* page (payout bank account and personal details), returning to `STRIPE_CONNECT_RETURN_URL`. Same response shape - the frontend just opens the URL either way.
+
 `dashboard_url` is single-use and short-lived (Stripe's standard login-link expiry) — fetch a new one each time rather than caching it. Works even if Stripe onboarding isn't fully finished yet: Stripe routes the braider through any outstanding requirements first before showing the dashboard itself, so this can be safely offered as soon as a Stripe Express account exists, not only once `is_complete` (see the `/status` endpoint) is `true`.
 
 ## Errors
@@ -39,7 +41,7 @@ No path/query params, no body.
 | Code | HTTP status | When |
 |---|---|---|
 | `STRIPE_ACCOUNT_NOT_FOUND` | 404 | The braider hasn't started Stripe Connect onboarding yet (no Stripe Express account exists) — call `POST .../payment-setup/account-link` first. |
-| `STRIPE_API_UNAVAILABLE` | 502 | Stripe's API errored or was unreachable when generating the login link. |
+| `STRIPE_API_UNAVAILABLE` | 502 | Stripe's API errored or was unreachable when generating the link. |
 | `INVALID_ACCESS_TOKEN` | 401 | missing/invalid/expired Bearer token |
 | `FORBIDDEN` | 403 | caller isn't a `BRAIDER` |
 
