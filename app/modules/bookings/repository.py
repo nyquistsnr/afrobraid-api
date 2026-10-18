@@ -529,16 +529,23 @@ async def get_booking_stats_for_admin(
         is_mobile=is_mobile,
         payment_schedule=payment_schedule,
         search=search,
-    ).subquery()
+    ).cte("filtered_bookings")
 
-    status_rows = (
-        await db.execute(select(filtered.c.status, func.count()).group_by(filtered.c.status))
-    ).all()
-    counts_by_status: dict[BookingStatus, int] = {row[0]: row[1] for row in status_rows}
+    def _repeat_count(column):
+        return (
+            select(func.count())
+            .select_from(select(column).group_by(column).having(func.count() > 1).subquery())
+            .scalar_subquery()
+        )
 
-    totals_row = (
+    # One round trip for status counts, totals and repeat counts (previously four).
+    status_columns = [
+        func.count().filter(filtered.c.status == s).label(f"status_{s.name}") for s in BookingStatus
+    ]
+    summary = (
         await db.execute(
             select(
+                *status_columns,
                 func.coalesce(func.sum(filtered.c.total), 0),
                 func.coalesce(func.sum(filtered.c.service_subtotal), 0),
                 func.coalesce(func.sum(filtered.c.platform_fee), 0),
@@ -546,30 +553,18 @@ async def get_booking_stats_for_admin(
                 func.coalesce(func.sum(cast(filtered.c.is_mobile, Integer)), 0),
                 func.count(func.distinct(filtered.c.customer_id)),
                 func.count(func.distinct(filtered.c.braider_id)),
+                _repeat_count(filtered.c.customer_id),
+                _repeat_count(filtered.c.braider_id),
             )
         )
     ).one()
-
-    repeated_customers = (
-        await db.scalar(
-            select(func.count()).select_from(
-                select(filtered.c.customer_id)
-                .group_by(filtered.c.customer_id)
-                .having(func.count() > 1)
-                .subquery()
-            )
-        )
-    ) or 0
-    repeated_braiders = (
-        await db.scalar(
-            select(func.count()).select_from(
-                select(filtered.c.braider_id)
-                .group_by(filtered.c.braider_id)
-                .having(func.count() > 1)
-                .subquery()
-            )
-        )
-    ) or 0
+    status_count = len(status_columns)
+    counts_by_status: dict[BookingStatus, int] = {
+        s: summary[i] for i, s in enumerate(BookingStatus) if summary[i]
+    }
+    totals_row = summary[status_count : status_count + 7]
+    repeated_customers = summary[status_count + 7] or 0
+    repeated_braiders = summary[status_count + 8] or 0
 
     payment_stmt = (
         select(
@@ -629,6 +624,7 @@ def _admin_payment_amount_column(metric: str):
 
 def _admin_payment_amount_subquery(
     *,
+    filtered,
     metric: str,
     payment_date_from: date | None = None,
     payment_date_to: date | None = None,
@@ -640,6 +636,8 @@ def _admin_payment_amount_subquery(
             func.coalesce(func.sum(amount_column), 0).label("amount_minor"),
         )
         .where(BookingPayment.status == PaymentStatus.SUCCEEDED)
+        # Only aggregate payments for the bookings being charted, not the whole table.
+        .where(BookingPayment.booking_id.in_(select(filtered.c.id)))
         .group_by(BookingPayment.booking_id)
     )
     stmt = _apply_payment_date_filters(
@@ -678,6 +676,7 @@ async def get_admin_revenue_timeseries(
         search=search,
     ).subquery()
     payment_amounts = _admin_payment_amount_subquery(
+        filtered=filtered,
         metric=metric,
         payment_date_from=payment_date_from,
         payment_date_to=payment_date_to,
@@ -726,6 +725,7 @@ async def get_admin_bookings_by_weekday(
         search=search,
     ).subquery()
     payment_amounts = _admin_payment_amount_subquery(
+        filtered=filtered,
         metric=metric,
         payment_date_from=payment_date_from,
         payment_date_to=payment_date_to,
@@ -774,6 +774,7 @@ async def get_admin_status_breakdown(
         search=search,
     ).subquery()
     payment_amounts = _admin_payment_amount_subquery(
+        filtered=filtered,
         metric=metric,
         payment_date_from=payment_date_from,
         payment_date_to=payment_date_to,
@@ -821,6 +822,7 @@ async def get_admin_style_breakdown(
         search=search,
     ).subquery()
     payment_amounts = _admin_payment_amount_subquery(
+        filtered=filtered,
         metric=metric,
         payment_date_from=payment_date_from,
         payment_date_to=payment_date_to,
@@ -862,6 +864,7 @@ async def get_admin_country_breakdown(
         search=search,
     ).subquery()
     payment_amounts = _admin_payment_amount_subquery(
+        filtered=filtered,
         metric=metric,
         payment_date_from=payment_date_from,
         payment_date_to=payment_date_to,

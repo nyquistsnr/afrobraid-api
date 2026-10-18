@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 
 from app.core import ws
 from app.core.config import get_settings
@@ -91,6 +92,8 @@ def create_app() -> FastAPI:
     # Middlewares are applied outside-in in reverse of registration order,
     # so CORS is added last to stay the outermost layer.
     app.add_middleware(LocaleMiddleware)
+    # List and dashboard payloads are JSON-heavy; compressing them cuts transfer time.
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,

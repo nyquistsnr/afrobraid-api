@@ -12,6 +12,15 @@ async def get_thread_by_id(db: AsyncSession, thread_id: uuid.UUID) -> ChatThread
     return await db.get(ChatThread, thread_id)
 
 
+async def list_threads_by_ids(
+    db: AsyncSession, thread_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, ChatThread]:
+    if not thread_ids:
+        return {}
+    result = await db.execute(select(ChatThread).where(ChatThread.id.in_(thread_ids)))
+    return {thread.id: thread for thread in result.scalars().all()}
+
+
 async def get_thread_by_booking(db: AsyncSession, booking_id: uuid.UUID) -> ChatThread | None:
     result = await db.execute(select(ChatThread).where(ChatThread.booking_id == booking_id))
     return result.scalar_one_or_none()

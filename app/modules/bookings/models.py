@@ -111,7 +111,7 @@ class Booking(Base):
     duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
 
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
-    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
     braider_timezone: Mapped[str] = mapped_column(String(64), nullable=False)
     blocked_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -208,7 +208,7 @@ class Booking(Base):
     terms_version: Mapped[str] = mapped_column(String(20), nullable=False)
     terms_accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
@@ -275,7 +275,7 @@ class BookingPayment(Base):
     )
     purpose: Mapped[PaymentPurpose] = mapped_column(Enum(PaymentPurpose, name="payment_purpose"), nullable=False)
     status: Mapped[PaymentStatus] = mapped_column(
-        Enum(PaymentStatus, name="payment_status"), nullable=False, default=PaymentStatus.PENDING
+        Enum(PaymentStatus, name="payment_status"), nullable=False, default=PaymentStatus.PENDING, index=True
     )
     amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
     currency: Mapped[Currency] = mapped_column(Enum(Currency, name="currency"), nullable=False)
@@ -290,7 +290,7 @@ class BookingPayment(Base):
     attempt_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     failure_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     failure_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )

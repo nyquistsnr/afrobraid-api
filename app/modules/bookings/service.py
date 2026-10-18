@@ -780,13 +780,11 @@ def _to_summary(
 
 
 async def _style_names_for(db: AsyncSession, bookings: list[Booking], *, locale: str) -> dict[uuid.UUID, str]:
-    style_ids = {b.style_id for b in bookings}
-    names: dict[uuid.UUID, str] = {}
-    for style_id in style_ids:
-        style = await styles_repo.get_style_by_id(db, style_id)
-        if style is not None:
-            names[style_id] = localize_field(style, "name", locale) or style.name_en
-    return names
+    styles = await styles_repo.list_styles_by_ids(db, list({b.style_id for b in bookings}))
+    return {
+        style_id: localize_field(style, "name", locale) or style.name_en
+        for style_id, style in styles.items()
+    }
 
 
 def _validate_date_range(date_from: date | None, date_to: date | None) -> None:

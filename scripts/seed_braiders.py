@@ -245,18 +245,42 @@ def _pick_city(rng: random.Random, index: int) -> CitySeed:
     return rng.choices(cities, weights=[c["weight"] for c in cities], k=1)[0]
 
 
-def _build_braider(
-    index: int, password_hash: str, style_ids: dict[str, uuid.UUID]
+class BraiderIdentity(TypedDict):
+    """Pins a braider to an existing identity (e.g. an already-verified Stripe
+    test account) instead of the index's random one."""
+
+    country: str
+    city: str
+    first_name: str
+    last_name: str
+    business_name: str
+
+
+def build_braider(
+    index: int,
+    password_hash: str,
+    style_ids: dict[str, uuid.UUID],
+    identity: BraiderIdentity | None = None,
 ) -> tuple[User, list[object], list[object]]:
     """Returns (user, rows that FK the user, rows that FK the profile) so the
     caller can flush them in dependency order."""
     rng = random.Random(index)  # same braider every re-run for a given index
     city = _pick_city(rng, index)
-    country = city["country"]
 
     first_name = rng.choice(_FIRST_NAMES)
     last_name = rng.choice(_LAST_NAMES)
     business_name = f"{first_name}'s {rng.choice(_BUSINESS_SUFFIXES)}"
+
+    if identity is not None:
+        candidates = _CITIES_BY_COUNTRY[identity["country"]]
+        city = next(
+            (c for c in candidates if c["city"] == identity["city"]),
+            rng.choices(candidates, weights=[c["weight"] for c in candidates], k=1)[0],
+        )
+        first_name = identity["first_name"]
+        last_name = identity["last_name"]
+        business_name = identity["business_name"]
+    country = city["country"]
 
     user = User(
         id=uuid.uuid4(),
@@ -373,7 +397,7 @@ async def main(count: int) -> None:
             user_children: list[object] = []
             profile_children: list[object] = []
             for index in todo[start : start + BATCH_SIZE]:
-                user, uc, pc = _build_braider(index, password_hash, style_ids)
+                user, uc, pc = build_braider(index, password_hash, style_ids)
                 users.append(user)
                 user_children.extend(uc)
                 profile_children.extend(pc)

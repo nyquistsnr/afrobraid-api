@@ -104,6 +104,22 @@ async def list_style_images(db: AsyncSession, style_id: uuid.UUID) -> list[Style
     return list(result.scalars().all())
 
 
+async def list_style_images_by_style_ids(
+    db: AsyncSession, style_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[StyleImage]]:
+    by_style: dict[uuid.UUID, list[StyleImage]] = {style_id: [] for style_id in style_ids}
+    if not style_ids:
+        return by_style
+    result = await db.execute(
+        select(StyleImage)
+        .where(StyleImage.style_id.in_(style_ids))
+        .order_by(StyleImage.style_id, StyleImage.position)
+    )
+    for image in result.scalars().all():
+        by_style[image.style_id].append(image)
+    return by_style
+
+
 async def delete_style_image(db: AsyncSession, image: StyleImage) -> None:
     await db.delete(image)
     await db.flush()
@@ -132,6 +148,28 @@ async def list_style_variations(
         stmt = stmt.where(StyleVariation.is_active.is_(True))
     result = await db.execute(stmt.order_by(StyleVariation.display_order))
     return list(result.scalars().all())
+
+
+async def list_style_variations_by_style_ids(
+    db: AsyncSession, style_ids: list[uuid.UUID], *, only_active: bool = False
+) -> dict[uuid.UUID, list[StyleVariation]]:
+    by_style: dict[uuid.UUID, list[StyleVariation]] = {style_id: [] for style_id in style_ids}
+    if not style_ids:
+        return by_style
+    stmt = select(StyleVariation).where(StyleVariation.style_id.in_(style_ids))
+    if only_active:
+        stmt = stmt.where(StyleVariation.is_active.is_(True))
+    result = await db.execute(stmt.order_by(StyleVariation.style_id, StyleVariation.display_order))
+    for variation in result.scalars().all():
+        by_style[variation.style_id].append(variation)
+    return by_style
+
+
+async def list_styles_by_ids(db: AsyncSession, style_ids: list[uuid.UUID]) -> dict[uuid.UUID, Style]:
+    if not style_ids:
+        return {}
+    result = await db.execute(select(Style).where(Style.id.in_(style_ids)))
+    return {style.id: style for style in result.scalars().all()}
 
 
 async def delete_style_variation(db: AsyncSession, variation: StyleVariation) -> None:

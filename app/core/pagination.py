@@ -44,13 +44,19 @@ async def paginate(
 
     `order_by(None)` on the count subquery drops any ORDER BY from `stmt` -
     irrelevant to a COUNT and some backends reject it in a subquery.
-    """
-    total_items = (
-        await db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery()))
-    ) or 0
 
+    The page is fetched first: a non-empty, partially filled page is the last
+    one, so the total is known without a second (often costlier) COUNT query.
+    """
     result = await db.execute(stmt.limit(params.page_size).offset(params.offset))
     items = list(result.scalars().all())
+
+    if len(items) < params.page_size and (items or params.offset == 0):
+        total_items = params.offset + len(items)
+    else:
+        total_items = (
+            await db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery()))
+        ) or 0
 
     total_pages = -(-total_items // params.page_size) if total_items else 0
 

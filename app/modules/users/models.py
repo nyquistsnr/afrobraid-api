@@ -35,7 +35,7 @@ class User(Base):
         String(32), unique=True, index=True, nullable=True
     )
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    user_type: Mapped[UserType] = mapped_column(Enum(UserType, name="user_type"), nullable=False)
+    user_type: Mapped[UserType] = mapped_column(Enum(UserType, name="user_type"), nullable=False, index=True)
     is_email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # `is_active=False` is currently only ever set by an admin suspension
     # (see users/admin_router.py) - there's no other deactivation path in
@@ -56,7 +56,7 @@ class User(Base):
     # never fanned out to every supported locale like reviews/bios are.
     chat_locale: Mapped[str | None] = mapped_column(String(5), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False

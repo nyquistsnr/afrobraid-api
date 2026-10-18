@@ -322,10 +322,16 @@ async def _to_admin_report_response(db: AsyncSession, report) -> AdminChatReport
     thread = await chat_repo.get_thread_by_id(db, report.thread_id)
     assert thread is not None
     names = await users_repo.list_full_names(db, [report.reporter_id, report.reported_user_id])
+    return _build_admin_report_response(report, booking_id=thread.booking_id, names=names)
+
+
+def _build_admin_report_response(
+    report, *, booking_id: uuid.UUID, names: dict[uuid.UUID, str]
+) -> AdminChatReportResponse:
     return AdminChatReportResponse(
         id=report.id,
         thread_id=report.thread_id,
-        booking_id=thread.booking_id,
+        booking_id=booking_id,
         reporter_id=report.reporter_id,
         reporter_name=names.get(report.reporter_id, ""),
         reported_user_id=report.reported_user_id,
@@ -344,7 +350,18 @@ async def list_admin_reports(
     db: AsyncSession, *, params: PaginationParams, status: ChatReportStatus | None
 ) -> PaginatedData[AdminChatReportResponse]:
     items, meta = await chat_repo.list_reports_for_admin(db, params=params, status=status)
-    return PaginatedData(items=[await _to_admin_report_response(db, r) for r in items], pagination=meta)
+    # Two batched lookups for the whole page instead of two queries per report.
+    threads = await chat_repo.list_threads_by_ids(db, list({r.thread_id for r in items}))
+    names = await users_repo.list_full_names(
+        db, list({uid for r in items for uid in (r.reporter_id, r.reported_user_id)})
+    )
+    return PaginatedData(
+        items=[
+            _build_admin_report_response(r, booking_id=threads[r.thread_id].booking_id, names=names)
+            for r in items
+        ],
+        pagination=meta,
+    )
 
 
 async def update_report(

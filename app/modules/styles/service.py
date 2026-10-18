@@ -339,6 +339,16 @@ async def get_style_public(db: AsyncSession, style_id: uuid.UUID, *, locale: str
     return _to_style_public_response(style, images=images, variations=variations, locale=locale)
 
 
+async def _load_style_children(db: AsyncSession, styles: list, *, only_active: bool):
+    """Two batched queries for a whole page of styles instead of two per style."""
+    style_ids = [style.id for style in styles]
+    images = await styles_repo.list_style_images_by_style_ids(db, style_ids)
+    variations = await styles_repo.list_style_variations_by_style_ids(
+        db, style_ids, only_active=only_active
+    )
+    return images, variations
+
+
 async def list_styles(
     db: AsyncSession,
     *,
@@ -352,11 +362,11 @@ async def list_styles(
     )
     styles, meta = await paginate(db, stmt, params)
 
-    items = []
-    for style in styles:
-        images = await styles_repo.list_style_images(db, style.id)
-        variations = await styles_repo.list_style_variations(db, style.id, only_active=only_active)
-        items.append(_to_style_response(style, images=images, variations=variations))
+    images, variations = await _load_style_children(db, styles, only_active=only_active)
+    items = [
+        _to_style_response(style, images=images[style.id], variations=variations[style.id])
+        for style in styles
+    ]
     return PaginatedData(items=items, pagination=meta)
 
 
@@ -374,13 +384,13 @@ async def list_styles_public(
     )
     styles, meta = await paginate(db, stmt, params)
 
-    items = []
-    for style in styles:
-        images = await styles_repo.list_style_images(db, style.id)
-        variations = await styles_repo.list_style_variations(db, style.id, only_active=only_active)
-        items.append(
-            _to_style_public_response(style, images=images, variations=variations, locale=locale)
+    images, variations = await _load_style_children(db, styles, only_active=only_active)
+    items = [
+        _to_style_public_response(
+            style, images=images[style.id], variations=variations[style.id], locale=locale
         )
+        for style in styles
+    ]
     return PaginatedData(items=items, pagination=meta)
 
 

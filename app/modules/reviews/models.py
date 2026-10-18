@@ -69,10 +69,10 @@ class Review(Base):
         Enum(BioSource, name="bio_source"), nullable=True
     )
     status: Mapped[ReviewStatus] = mapped_column(
-        Enum(ReviewStatus, name="review_status"), nullable=False, default=ReviewStatus.PENDING
+        Enum(ReviewStatus, name="review_status"), nullable=False, index=True, default=ReviewStatus.PENDING
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
